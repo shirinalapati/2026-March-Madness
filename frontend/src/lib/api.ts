@@ -56,14 +56,22 @@ function asString(value: unknown, fallback: string) {
   return typeof value === "string" && value.length ? value : fallback;
 }
 
+function firstString(record: Record<string, unknown>, keys: string[], fallback: string) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length) return value;
+  }
+  return fallback;
+}
+
 function normalizeTeam(value: unknown, fallbackId = "duke"): Team {
   const record = isRecord(value) ? value : {};
-  const id = asString(record.id, fallbackId);
+  const id = firstString(record, ["id", "team_id"], fallbackId);
   const base = demoTeamsById.get(id) ?? demoTeamsById.get(fallbackId) ?? demoTeams[0];
   const normalized = { ...base, ...record } as Team;
 
-  normalized.id = asString(record.id, base.id);
-  normalized.name = asString(record.name, base.name);
+  normalized.id = demoTeamsById.has(id) ? id : base.id;
+  normalized.name = firstString(record, ["name", "team_name"], base.name);
   normalized.region = asString(record.region, base.region);
   normalized.conference = asString(record.conference, base.conference);
   normalized.overall_record = asString(record.overall_record, base.overall_record);
@@ -120,6 +128,20 @@ function normalizeArray<T>(value: unknown, normalizeItem: (item: unknown) => T, 
   return Array.isArray(value) ? value.map(normalizeItem) : fallback;
 }
 
+function normalizeTeamSummaries(value: unknown): TeamSummary[] {
+  if (!Array.isArray(value)) return demoTeamSummaries;
+
+  const recordsByKnownId = new Map<string, unknown>();
+  value.forEach((item) => {
+    if (!isRecord(item)) return;
+    const id = firstString(item, ["id", "team_id"], "");
+    if (demoTeamsById.has(id)) recordsByKnownId.set(id, item);
+  });
+
+  if (!recordsByKnownId.size) return demoTeamSummaries;
+  return demoTeamSummaries.map((team) => normalizeTeamSummary(recordsByKnownId.get(team.id) ?? team));
+}
+
 async function getJson<T>(path: string, fallback: () => T): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${path}`);
@@ -131,9 +153,7 @@ async function getJson<T>(path: string, fallback: () => T): Promise<T> {
 }
 
 export function getTeams(): Promise<TeamSummary[]> {
-  return getJson<unknown>("/teams", () => demoTeamSummaries).then((items) =>
-    normalizeArray(items, normalizeTeamSummary, demoTeamSummaries),
-  );
+  return getJson<unknown>("/teams", () => demoTeamSummaries).then(normalizeTeamSummaries);
 }
 
 export function getTeamProfile(teamId: string): Promise<TeamProfile> {
